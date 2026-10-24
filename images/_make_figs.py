@@ -880,7 +880,317 @@ def fig11():
     f.save("fig11-startup-sequence.png")
 
 
+# ============================================================ 图12 三张表
+def fig12():
+    f = Fig(1400, 700)
+    f.title("12 · 三张表，同一个坐标：token_pool → page_table → KV cache",
+            "都按 (table_idx, position) 索引；page_size=1 时 page 号就是 KV 的第几行")
+
+    def grid(x, y, w, h, rows, cols, fill, edge, title, sub, tc):
+        f.rect([x, y, x + w, y + h], fill=fill, outline=edge, width=2.2, radius=8)
+        f.text(x + w / 2, y - 46, title, 13.5, tc, "mt", bold=True)
+        f.text(x + w / 2, y - 22, sub, 10.5, MUT, "mt")
+        for i in range(1, rows):
+            yy = y + h * i / rows
+            f.line(x + 2, yy, x + w - 2, yy, GRID, 1)
+        for j in range(1, cols):
+            xx = x + w * j / cols
+            f.line(xx, y + 2, xx, y + h - 2, GRID, 1)
+
+    # 1. token_pool
+    grid(60, 150, 300, 210, 5, 6, BLUE_L, BLUE, "token_pool",
+         "[257, 32768]  int32  ·  存 token id", BLUE)
+    f.rect([150, 192, 198, 234], fill="#FFFFFF", outline=BLUE, width=2.2)
+    f.text(174, 213, "12345", 10.5, BLUE, "mm", bold=True, mono=True)
+
+    # 2. page_table
+    grid(470, 150, 300, 210, 5, 6, ORANGE_L, ORANGE, "page_table",
+         "[257, 32768]  int32  ·  存 KV 行号", ORANGE)
+    f.rect([560, 192, 608, 234], fill="#FFFFFF", outline=ORANGE, width=2.2)
+    f.text(584, 213, "8821", 10.5, ORANGE, "mm", bold=True, mono=True)
+
+    # 3. kv cache
+    f.rect([880, 150, 1340, 360], fill=GREEN_L, outline=GREEN, width=2.2, radius=8)
+    f.text(1110, 104, "kv_cache（真正的字节）", 13.5, GREEN, "mt", bold=True)
+    f.text(1110, 128, "[2, 28, 46933, 1, 8, 128]  bf16", 10.5, MUT, "mt")
+    f.text(900, 168, "K/V  →", 11, MUT, "lt", mono=True)
+    f.text(900, 192, "28 层  ↓", 11, MUT, "lt", mono=True)
+    f.text(900, 216, "row 0", 10, FAINT, "lt", mono=True)
+    f.text(900, 250, "…", 12, FAINT, "lt", mono=True)
+    f.rect([960, 290, 1180, 326], fill="#FFFFFF", outline=GREEN, width=2.2, radius=4)
+    f.text(1070, 308, "row 8821  [8, 128]", 10.5, GREEN, "mm", bold=True, mono=True)
+    f.text(900, 300, "→", 14, GREEN, "lt", bold=True)
+    f.text(900, 330, "…", 12, FAINT, "lt", mono=True)
+
+    # 下标对齐提示
+    f.dashed(60, 390, 1340, 390, LINE, 1.2, (7, 5))
+    f.text(700, 400, "三者用同一组下标 (i, j)：第 i 条请求槽位的第 j 个 token", 12, INK,
+           "mt", bold=True)
+
+    # 箭头
+    f.arrow(366, 213, 462, 213, BLUE, 2.5, 9)
+    f.text(414, 190, "查表", 11, BLUE, "mb", bold=True)
+    f.arrow(776, 213, 872, 213, ORANGE, 2.5, 9)
+    f.text(824, 190, "定位", 11, ORANGE, "mb", bold=True)
+
+    # gather 说明
+    f.rect([60, 440, 1340, 520], fill=PANEL, outline=LINE, width=1.2, radius=8)
+    f.text(78, 452, "为什么要两张同形的表？因为它们永远用同一组下标做 gather：", 12, INK, bold=True)
+    f.text(78, 478, "input_mapping = (每 token 的 table_idx, 每 token 的 position)", 11.5, MUT,
+           mono=True)
+    f.text(78, 500, "batch.input_ids = token_pool[input_mapping]     batch.out_loc = page_table[input_mapping]",
+           11.5, MUT, mono=True)
+
+    # 结论
+    f.rect([60, 546, 1340, 640], fill="#FFFBF5", outline="#F3D6AE", width=1.5, radius=8)
+    f.text(78, 560, "token_pool：只给 embedding 用（token id → 向量）；出了 embedding 就没人再看它。",
+           12.5, INK)
+    f.text(78, 588, "page_table：只给 KV cache 用（token 位置 → 该读/写哪一行 K/V）；attention 和 store_kv 都靠它。",
+           12.5, INK)
+    f.text(78, 616, "同形不是巧合：两者必须“对齐”，否则同一个 token 的 id 和 KV 会错位。", 12.5, RED)
+    f.save("fig12-pagetable-three-tables.png")
+
+
+# ============================================================ 图13 page_table 形状
+def fig13():
+    f = Fig(1400, 760)
+    f.title("13 · page_table 的形状：[257, 32768]，一行 = 一个请求槽位",
+            "257 = 256 个并发槽位 + 1 行给 dummy 请求；32768 ≈ max_seq_len 向上对齐到 32")
+
+    x0, y0, x1, y1 = 250, 130, 1000, 560
+    rows, cols = 7, 10
+    f.rect([x0, y0, x1, y1], fill="#FFFFFF", outline=ORANGE, width=2.2, radius=6)
+    for i in range(1, rows):
+        yy = y0 + (y1 - y0) * i / rows
+        f.line(x0 + 2, yy, x1 - 2, yy, GRID, 1)
+    for j in range(1, cols):
+        xx = x0 + (x1 - x0) * j / cols
+        f.line(xx, y0 + 2, xx, y1 - 2, GRID, 1)
+
+    # 前 4 行：有效区
+    for r in range(4):
+        ry = y0 + (y1 - y0) * r / rows
+        rh = (y1 - y0) / rows
+        f.rect([x0 + 2, ry + 1, x0 + (x1 - x0) * 0.5, ry + rh - 1], fill=ORANGE_L, radius=2)
+        f.text(x0 + 14, ry + rh / 2, f"table_idx = {r}", 10.5, ORANGE, "lm", bold=True, mono=True)
+
+    # 省略行（手画竖排点，字体里没有 ⋮）
+    for k in range(3):
+        yy = y0 + (y1 - y0) * 4 / rows + 8 + k * 7
+        f.ellipse([(x0 + x1) / 2 - 2, yy, (x0 + x1) / 2 + 2, yy + 4], fill=FAINT)
+    for k in range(3):
+        yy = y0 + (y1 - y0) * 5 / rows + 8 + k * 7
+        f.ellipse([(x0 + x1) / 2 - 2, yy, (x0 + x1) / 2 + 2, yy + 4], fill=FAINT)
+
+    # dummy 行
+    dy = y0 + (y1 - y0) * 6 / rows
+    dh = (y1 - y0) / rows
+    f.rect([x0 + 2, dy + 2, x1 - 2, dy + dh - 2], fill=RED_L, outline=RED, width=2, radius=3)
+    f.text(x0 + 14, dy + dh / 2, "table_idx = 256", 10.5, RED, "lm", bold=True, mono=True)
+    f.text(x1 - 14, dy + dh / 2, "dummy 请求专用（整行 fill 成 num_tokens）", 10, RED, "rm")
+
+    # 维度标注
+    f.dim_h(x0, x1, y0 - 26, "aligned_max_seq_len = 32768（token 位置）")
+    f.text(x0 - 16, y0 + 4, "257 行", 11.5, ORANGE, "rt", bold=True)
+    f.text(x0 - 16, y0 + 24, "256 请求 + 1 dummy", 10, MUT, "rt")
+
+    # 有效 / 无效区标注
+    f.arrow(x0 + 20, y1 + 22, x0 + (x1 - x0) * 0.5, y1 + 22, GREEN, 1.6, 6)
+    f.text(x0 + 20, y1 + 32, "[0, cached_len) 有效：attention kernel 会读到", 11, GREEN)
+    f.arrow(x0 + (x1 - x0) * 0.52, y1 + 22, x1 - 10, y1 + 22, FAINT, 1.6, 6)
+    f.text(x0 + (x1 - x0) * 0.52, y1 + 32, "[cached_len, ·) 未分配：内容是脏的，没人读", 11, FAINT)
+
+    # 右侧说明
+    sx = 1040
+    notes = [
+        ("4 字节 / 格", "int32，存的是“第几行 KV”"),
+        ("整表 40.2 MiB", "257 × 40960 × 4 B（默认 num_pages=46932 时）"),
+        ("行 = 槽位", "由 TableManager.allocate() 发号"),
+        ("列 = 位置", "第 j 个 token 永远在第 j 列"),
+        ("对齐 32", "int32 × 32 = 128 B，凑缓存行；也让 indptr 访问对齐"),
+    ]
+    for i, (k, v) in enumerate(notes):
+        y = 130 + i * 62
+        f.rect([sx, y, 1360, y + 52], fill=PANEL, outline=LINE, width=1, radius=6)
+        f.text(sx + 14, y + 8, k, 12, INK, bold=True)
+        f.text(sx + 14, y + 28, v, 10, MUT)
+
+    f.rect([60, 620, 1360, 706], fill="#FFFBF5", outline="#F3D6AE", width=1.5, radius=8)
+    f.text(78, 632, "为什么第 0 维要 +1：CUDA graph 捕获时用 dummy_req 跑，它必须有自己的行；"
+                    "整行指向 dummy page（第 num_tokens 行）。", 12.5, INK)
+    f.text(78, 660, "为什么“列”是位置而不是“页号”：（page_size=1 时）一格 = 一个 token 的 KV 行，"
+                    "这样 out_loc 直接就是 gather 结果。", 12.5, MUT)
+    f.text(78, 686, "源码：engine.py:65-73（分配）、98（dummy 行 fill）、core.py:103（注释：always treat page_size = 1）。",
+           11, FAINT)
+    f.save("fig13-pagetable-shape.png")
+
+
+# ============================================================ 图14 gather / scatter
+def fig14():
+    f = Fig(1400, 800)
+    f.title("14 · 一次 decode step：page_table 被 gather 成 out_loc，再 scatter 写入 KV",
+            "两条请求，extend 3 + 2 个 token（T=5）；page_size=1 所以 out_loc 就是 KV 行号")
+
+    # batch 请求
+    f.text(60, 104, "① 调度器组 batch（reqs + positions）", 12.5, INK, bold=True)
+    reqs = [("req A", 2, "pos 10..12", BLUE, BLUE_L), ("req B", 5, "pos 0..1", GREEN, GREEN_L)]
+    y = 132
+    for name, idx, pr, c, cl in reqs:
+        f.rect([60, y, 360, y + 46], fill=cl, outline=c, width=1.8, radius=7)
+        f.text(74, y + 6, f"{name}   table_idx = {idx}", 12, c, bold=True)
+        f.text(74, y + 26, f"新算 {pr}  →  extend_len", 10.5, MUT)
+        y += 60
+
+    # input_mapping
+    f.text(60, 254, "② input_mapping = (table_idx 展开, positions)", 12.5, INK, bold=True)
+    f.rect([60, 280, 640, 340], fill=PANEL, outline=LINE, width=1.2, radius=7)
+    f.text(74, 292, "rows  [2, 2, 2, 5, 5]", 12, BLUE, "lt", mono=True)
+    f.text(74, 314, "cols  [10, 11, 12, 0, 1]", 12, ORANGE, "lt", mono=True)
+    f.text(330, 300, "↑ 同一组下标，查两张表", 11, MUT)
+
+    # gather
+    f.text(60, 366, "③ page_table[input_mapping] → out_loc", 12.5, INK, bold=True)
+    f.rect([60, 392, 640, 452], fill=ORANGE_L, outline=ORANGE, width=1.8, radius=7)
+    f.text(74, 404, "out_loc  [500, 501, 502, 800, 801]   ← 5 个 token 各自的 KV 行号", 11.5, ORANGE,
+           "lt", bold=True, mono=True)
+    f.text(74, 428, "shape [T] = [5]", 10.5, MUT, "lt", mono=True)
+    f.arrow(620, 346, 620, 388, ORANGE, 2, 8)
+
+    # KV cache scatter
+    f.text(60, 478, "④ store_kv(k, v, out_loc, layer_id) 把本步的 K/V 散写进去", 12.5, INK, bold=True)
+    f.rect([730, 492, 1000, 700], fill=GREEN_L, outline=GREEN, width=2, radius=7)
+    f.text(865, 480, "KV cache 某一层  [num_tokens, 8, 128]", 10.5, MUT, "mb")
+    rows_ = [(500, BLUE, "A0", 500), (501, BLUE, "A1", 520), (502, BLUE, "A2", 540),
+             (800, GREEN, "B0", 596), (801, GREEN, "B1", 616)]
+    for row, c, lab, yy in rows_:
+        f.rect([745, yy, 985, yy + 15], fill=("#FFFFFF" if yy % 2 == 0 else "#F4FBF7"),
+               outline=c, width=1.2, radius=3)
+        f.text(760, yy + 1, f"row {row}", 9.5, c, "lt", mono=True)
+        f.text(970, yy + 1, lab, 9.5, MUT, "rt", mono=True)
+    for k in range(3):
+        f.ellipse([862, 562 + k * 8, 868, 566 + k * 8], fill=FAINT)
+    f.text(1010, 566, "行号不连续 ——", 9.5, FAINT, "lt")
+    f.text(1010, 582, "由 allocator 决定", 9.5, FAINT, "lt")
+
+    # 右上角：解释"为什么需要映射表"
+    f.rect([1010, 130, 1360, 340], fill=PANEL, outline=LINE, width=1.2, radius=8)
+    f.text(1028, 142, "为什么非要这张表", 12.5, INK, bold=True)
+    for i, s in enumerate([
+        "一个请求的 KV 行不需要连续：",
+        "· 可以按需分配（省显存）",
+        "· 可以复用别人的前缀（省计算）",
+        "· 可以整块搬迁/逐出",
+        "",
+        "代价：每次都要查表，",
+        "这就是 paged attention 的本质。",
+    ]):
+        f.text(1028, 170 + i * 22, s, 11, (MUT if s else MUT))
+    f.text(865, 648, "row 500~502：A 本步要写的 3 行", 9.5, FAINT, "mt")
+    f.text(865, 668, "row 800~801：B 本步要写的 2 行", 9.5, FAINT, "mt")
+
+    # 箭头 ④
+    f.arrow(650, 470, 726, 560, GREEN, 2.2, 9)
+    f.text(690, 500, "scatter", 11, GREEN, "lb", bold=True)
+
+    # attention 索引
+    f.text(60, 560, "⑤ attention 还要另一种索引：", 12.5, INK, bold=True)
+    f.rect([60, 586, 640, 690], fill=PANEL, outline=LINE, width=1.2, radius=7)
+    f.text(74, 598, "paged_kv_indices = cat([", 11, MUT, "lt", mono=True)
+    f.text(96, 618, "page_table[A.table_idx, :13],   # 10..12 之前的全部历史", 10.5, MUT, "lt", mono=True)
+    f.text(96, 638, "page_table[B.table_idx, :2],    # B 只有 2 个", 10.5, MUT, "lt", mono=True)
+    f.text(74, 658, "])  → 喂给 FlashInfer 当 kv_indices", 11, MUT, "lt", mono=True)
+    f.text(74, 678, "注意：这里要的是**整段历史**，不只是本步的 5 个。", 10.5, RED, "lt")
+
+    # 结论
+    f.rect([60, 712, 1360, 780], fill="#FFFBF5", outline="#F3D6AE", width=1.5, radius=8)
+    f.text(78, 724, "同一个 page_table，被读成两种东西：", 12.5, INK, bold=True)
+    f.text(78, 750, "· page_table[input_mapping]           → out_loc（本步 T 个 token 的写入行）",
+           11.5, ORANGE, mono=False)
+    f.text(78, 770, "· page_table[table_idx, :device_len]  → 每条请求的完整 KV 索引（attention 读）",
+           11.5, GREEN)
+    f.save("fig14-pagetable-gather.png")
+
+
+# ============================================================ 图15 两个池子
+def fig15():
+    f = Fig(1400, 760)
+    f.title("15 · TableManager 与 CacheManager：两套独立的编号，page_table 是把它们连起来的桥",
+            "槽位（行号）不会变；page（KV 行）会随 prefix cache 复用/逐出而重新分配")
+
+    # 左：槽位池
+    f.text(60, 104, "TableManager：只管“行号”", 13, BLUE, bold=True)
+    f.rect([60, 130, 470, 190], fill=BLUE_L, outline=BLUE, width=1.6, radius=7)
+    f.text(74, 142, "free_slots = list(range(257))", 11.5, BLUE, "lt", mono=True)
+    f.text(74, 162, "allocate() → pop()    free() → append()", 10.5, MUT, "lt", mono=True)
+    f.text(74, 178, "O(1)，不碰显存 —— 所以用 list 就够", 10, FAINT, "lt")
+
+    f.rect([60, 210, 470, 330], fill="#FFFFFF", outline=BLUE, width=1.4, radius=7)
+    f.text(74, 220, "槽位数组（256 个给请求）", 11, INK, bold=True)
+    for i in range(8):
+        x = 74 + i * 48
+        used = i in (0, 3)
+        f.rect([x, 246, x + 40, 286], fill=(BLUE if used else BLUE_L), outline=BLUE,
+               width=1.2, radius=4)
+        f.text(x + 20, 258, str(i), 10, ("#FFFFFF" if used else BLUE), "mt", mono=True)
+        f.text(x + 20, 274, (f"req#{i}" if used else "空闲"), 8,
+               ("#FFFFFF" if used else FAINT), "mt")
+    f.text(74, 296, "…", 12, FAINT)
+    f.text(60, 344, "第 257 个（index 256）永久留给 dummy_req，不参与分配", 10, RED)
+
+    # 右：page 池
+    f.text(530, 104, "CacheManager：只管“KV 行”", 13, GREEN, bold=True)
+    f.rect([530, 130, 960, 190], fill=GREEN_L, outline=GREEN, width=1.6, radius=7)
+    f.text(544, 142, "free_slots = arange(num_pages) * page_size", 11.5, GREEN, "lt", mono=True)
+    f.text(544, 162, "_allocate(n) → 取前 n 个；不够就 prefix_cache.evict()", 10.5, MUT, "lt", mono=True)
+    f.text(544, 178, "按 page 对齐的 int32 张量，O(1) 切片", 10, FAINT, "lt")
+
+    f.rect([530, 210, 960, 330], fill="#FFFFFF", outline=GREEN, width=1.4, radius=7)
+    f.text(544, 220, "KV 行（num_tokens 个，本图只画 16）", 11, INK, bold=True)
+    for i in range(16):
+        x = 544 + (i % 8) * 50
+        yy = 246 + (i // 8) * 44
+        f.rect([x, yy, x + 42, yy + 34], fill=GREEN_L, outline=GREEN, width=1, radius=3)
+        f.text(x + 21, yy + 11, str(i * 1000 + 500), 8, GREEN, "mt", mono=True)
+
+    # 桥
+    f.text(1000, 104, "page_table：把两者连起来", 13, ORANGE, bold=True)
+    f.rect([1000, 130, 1360, 300], fill=ORANGE_L, outline=ORANGE, width=1.6, radius=7)
+    f.text(1014, 142, "page_table[table_idx, position] = page", 11.5, ORANGE, "lt", mono=True)
+    f.text(1014, 168, "“第 i 条请求的第 j 个 token，", 11, MUT, "lt")
+    f.text(1014, 188, " 它的 K/V 存在第 page 行”", 11, MUT, "lt")
+    f.text(1014, 216, "改的是映射，不是数据；", 11, MUT, "lt")
+    f.text(1014, 236, "所以 page 可以复用/搬家。", 11, MUT, "lt")
+    f.text(1014, 262, "槽位（行）却始终跟着请求走。", 11, RED, "lt")
+    f.text(1014, 284, "engine.py:69 / cache.py:146", 9.5, FAINT, "lt", mono=True)
+
+    # 生命周期
+    f.text(60, 366, "一次请求的编号生命周期", 13, INK, bold=True)
+    steps = [
+        ("1", "table_manager.allocate()", "拿到 table_idx（行号）", BLUE, BLUE_L),
+        ("2", "cache_manager.match_req()", "查 prefix cache，得 cached_len（可能 > 0）", ORANGE, ORANGE_L),
+        ("3", "_try_allocate_one 里 copy 前缀", "token_pool / page_table 的前 cached_len 列填好", ORANGE, ORANGE_L),
+        ("4", "cache_manager.allocate_paged(batch)", "为本步 extend 的 token 分配新 page", GREEN, GREEN_L),
+        ("5", "_write_page_table(...)", "page_table[table_idx, pos] = page", GREEN, GREEN_L),
+        ("6", "scheduler: out_loc = page_table[input_mapping]", "gather 出本步 T 个行号", RED, RED_L),
+        ("7", "请求结束 → _free_req_resources", "table free（还行号）+ cache free（还 page 或交给 radix）", RED, RED_L),
+    ]
+    y = 394
+    for num, code, desc, c, cl in steps:
+        f.rect([60, y, 90, y + 34], fill=c, radius=17)
+        f.text(75, y + 17, num, 12, "#FFFFFF", "mm", bold=True)
+        f.rect([100, y, 1360, y + 34], fill=cl, outline=c, width=1.2, radius=6)
+        f.text(116, y + 8, code, 10.5, c, "lt", bold=True, mono=True)
+        f.text(560, y + 8, desc, 10.5, INK, "lt")
+        y += 42
+
+    f.rect([60, 716, 1360, 750], fill="#FFFBF5", outline="#F3D6AE", width=1.2, radius=4)
+    f.text(74, 726, "两套池子完全独立：槽位号永远 < 257，page 号可能上万 —— 所以别把 table_idx 当 page 用。",
+           10.5, MUT)
+    f.save("fig15-two-pools.png")
+
+
 if __name__ == "__main__":
-    want = sys.argv[1:] or ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"]
+    want = sys.argv[1:] or ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11",
+                            "12", "13", "14", "15"]
     for n in want:
         globals()[f"fig{n.zfill(2)}"]()

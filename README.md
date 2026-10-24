@@ -16,6 +16,7 @@
 | 02 | [读懂一个模型目录（Qwen3-0.6B 实战）](02-手把手带你读懂一个模型目录-Qwen3-0.6B实战.md) | 逐文件拆模型目录：safetensors 头怎么读、`config.json` 字段之间的推导、词表四件套、`chat_template`、三个别搞混的「长度」 | — |
 | 03 | [调试 main 进程启动](03sglang调试main进程启动.md) | 启动链路 7 步、进程拓扑与四条 ZMQ 通道、`ModelConfig` 逐字段解释、VSCode + debugpy 远程调试 | 2 张 |
 | 04 | [张量并行 TP 是怎么切的](04-张量并行TP是怎么切的.md) | 只切三个维度（vocab / head / intermediate）；每层 2 次 all-reduce 的通信账本；权重怎么"切着加载"；与 vLLM / SGLang 的对应 | 7 张 |
+| 05 | [page_table 与 TableManager 源码解析](05-page_table与TableManager源码解析.md) | 三张表（token_pool / page_table / kv_cache）的形状与关系；`TableManager` 21 行逐行；`page_table` 的四种读、两种写；KV 分配的五段生命周期 | 4 张 |
 | — | [踩坑记录](踩坑记录.md) | 14 条，现象 / 根因 / 解法 / 验证四段式，开头带索引表 | — |
 
 ## 为什么这些结论可信
