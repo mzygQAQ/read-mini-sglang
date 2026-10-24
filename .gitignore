@@ -1,0 +1,14 @@
+# 临时产物：从 WSL 镜像出来的源码副本（见 AGENTS.md §3.2），不要提交
+.tmp-src/
+.tmp/
+*.tmp
+
+# Windows 资源管理器/缩略图
+Thumbs.db
+desktop.ini
+ehthumbs.db
+
+# 编辑器/系统杂物
+.vscode/
+.idea/
+.DS_Store
