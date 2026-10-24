@@ -38,7 +38,7 @@
 | 文件 | 规模 | 覆盖内容 | 什么时候看 |
 |---|---|---|---|
 | `01-WSL-Ubuntu24.04-mini-sglang-环境配置与运行指南.md` | 987 行 + 2 张图 | 从零装 WSL/apt 换源/uv/CUDA 12.8/部署 minisgl、显存与 KV cache 计算、HTTP 接口全表、一键复现脚本 | 环境、启动、接口、调参 |
-| `02-手把手带你读懂一个模型目录-Qwen3-0.6B实战.md` | ~670 行 | 逐文件拆 Qwen3-0.6B 模型目录：safetensors 头、config.json 推导关系、词表四件套、chat_template、三个「长度」 | 模型格式、显存估算、tokenizer |
+| `02-手把手带你读懂一个模型目录-Qwen3-0.6B实战.md` | 1012 行 | 逐文件拆 Qwen3-0.6B 模型目录：safetensors 头（**完整 311 个张量** + 分组表）、config.json 推导关系、词表四件套、chat_template、三个「长度」 | 模型格式、显存估算、tokenizer |
 | `03sglang调试main进程启动.md` | 151 行 + 2 张图 | main 进程启动调试手记：启动 7 步、进程拓扑与四条 ZMQ 通道、启动日志里的 `ModelConfig` 逐字段解释、debugpy 远程调试 | 进程/启动链路 |
 | `04-张量并行TP是怎么切的.md` | 381 行 + 7 张图 | TP 只切三个维度：vocab / head / intermediate；每层 2 次 all-reduce 的账本；权重如何切着加载；与 vLLM/SGLang 的对应 | 并行原理、多卡、读 `layers/` 代码 |
 | `踩坑记录.md` | 14 条 | 现象 / 根因 / 解法 / 验证四段式，开头带索引表 | 遇到报错先在这里搜关键词 |
@@ -185,3 +185,27 @@ Claude Code 读的是 `CLAUDE.md`，需要时让它一行 `@AGENTS.md` 指过来
 
 - upstream：<https://github.com/sgl-project/mini-sglang>
 - 本文件最后更新：2026-10-24
+
+---
+
+## 9. 网络：`git push` 通不了的时候
+
+实测（2026-10-24 同一小时内反复出现）：`github.com:443` 的 TLS 会被 reset
+（`OpenSSL SSL_read: Connection was reset, errno 10054`）或直接超时，**但 `api.github.com` 一直是通的**。
+这时 `git push` 无论重试多少次都没用，可以改走 **Git Data API** 补推：
+
+1. `POST /git/blobs`（base64 内容）—— 上传每个改动文件，返回的 blob SHA 必须与本地一致
+2. `POST /git/trees`（`base_tree` = 父提交的 tree + 本次变更条目）—— tree SHA 也必须一致
+3. `POST /git/commits`（tree + parents + **原样的 author/committer 姓名、邮箱、时间**）—— commit SHA 必须一致
+4. `PATCH /git/refs/heads/main`
+
+**关键是第 1–3 步都校验 SHA**：只要有一个不一致就中止、不碰 ref，本地与远端就不会分叉。
+如果图省事不校验，直接拿 API 造一个"内容相同但 SHA 不同"的 commit，本地历史就跟远端错开了，
+而 `fetch` 也走不通，后面会很麻烦。
+
+其他已知事实：
+
+- SSH key（`~/.ssh/id_rsa`）**没有绑到 GitHub**，`ssh -T git@github.com` 是 `Permission denied (publickey)`；
+  推代码走 HTTPS，凭据来自 Windows 凭据管理器里的 PAT（`credential.helper=manager-core`），不需要交互。
+- 本机没装 `gh` CLI。
+- 临时补推脚本：`%TEMP%\dsh-api-push.py`（需要时再生成一次即可，逻辑就是上面的 4 步）。
